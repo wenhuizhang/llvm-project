@@ -798,3 +798,22 @@ std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 mlir::createGpuToLLVMConversionPass() {
   return std::make_unique<GpuToLLVMConversionPass>();
 }
+
+void mlir::populateGpuToLLVMConversionPatterns(
+    LLVMTypeConverter &converter, OwningRewritePatternList &patterns) {
+  auto gpuBinaryAnnotation = gpu::getDefaultGpuBinaryAnnotation();
+  converter.addConversion(
+      [context = &converter.getContext()](gpu::AsyncTokenType type) -> Type {
+        return LLVM::LLVMPointerType::get(IntegerType::get(context, 8));
+      });
+  patterns.add<ConvertAllocOpToGpuRuntimeCallPattern,
+               ConvertDeallocOpToGpuRuntimeCallPattern,
+               ConvertHostRegisterOpToGpuRuntimeCallPattern,
+               ConvertMemcpyOpToGpuRuntimeCallPattern,
+               ConvertWaitAsyncOpToGpuRuntimeCallPattern,
+               ConvertWaitOpToGpuRuntimeCallPattern,
+               ConvertAsyncYieldToGpuRuntimeCallPattern>(converter);
+  patterns.add<ConvertLaunchFuncOpToGpuRuntimeCallPattern>(converter,
+                                                           gpuBinaryAnnotation);
+  patterns.add<EraseGpuModuleOpPattern>(&converter.getContext());
+}
