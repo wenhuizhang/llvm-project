@@ -266,6 +266,11 @@ protected:
 // Preprocessor Actions
 //===----------------------------------------------------------------------===//
 
+class wenhuiFunctionAction : public PreprocessorFrontendAction {
+protected:
+  void ExecuteAction() override;
+};
+
 class DumpRawTokensAction : public PreprocessorFrontendAction {
 protected:
   void ExecuteAction() override;

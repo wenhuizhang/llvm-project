@@ -748,6 +748,25 @@ void DumpModuleInfoAction::ExecuteAction() {
 // Preprocessor Actions
 //===----------------------------------------------------------------------===//
 
+void wenhuiFunctionAction::ExecuteAction() {
+  Preprocessor &PP = getCompilerInstance().getPreprocessor();
+  SourceManager &SM = PP.getSourceManager();
+
+  // Start lexing the specified input file.
+  llvm::MemoryBufferRef FromFile = SM.getBufferOrFake(SM.getMainFileID());
+  Lexer RawLex(SM.getMainFileID(), FromFile, SM, PP.getLangOpts());
+  RawLex.SetKeepWhitespaceMode(true);
+
+  Token RawTok;
+  RawLex.LexFromRawLexer(RawTok);
+  while (RawTok.isNot(tok::eof)) {
+    PP.DumpToken(RawTok, true);
+    llvm::errs() << "\n";
+    RawLex.LexFromRawLexer(RawTok);
+  }
+}
+
+
 void DumpRawTokensAction::ExecuteAction() {
   Preprocessor &PP = getCompilerInstance().getPreprocessor();
   SourceManager &SM = PP.getSourceManager();

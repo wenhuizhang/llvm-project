@@ -2340,6 +2340,7 @@ static bool parseTestModuleFileExtensionArg(StringRef Arg,
 /// frontend options.
 static const auto &getFrontendActionTable() {
   static const std::pair<frontend::ActionKind, unsigned> Table[] = {
+      {frontend::wenhuiFunction, OPT_dump_raw_tokens},
       {frontend::ASTDeclList, OPT_ast_list},
 
       {frontend::ASTDump, OPT_ast_dump_all_EQ},
@@ -3968,6 +3969,7 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
 
 static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
   switch (Action) {
+  case frontend::wenhuiFunction:
   case frontend::ASTDeclList:
   case frontend::ASTDump:
   case frontend::ASTPrint:

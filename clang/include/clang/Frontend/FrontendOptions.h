@@ -32,6 +32,9 @@ namespace clang {
 namespace frontend {
 
 enum ActionKind {
+  /// Dump wenhui function
+  wenhuiFunction,
+
   /// Parse ASTs and list Decl nodes.
   ASTDeclList,
 

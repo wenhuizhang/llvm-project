@@ -42,12 +42,12 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
   (void)Action;
 
   switch (CI.getFrontendOpts().ProgramAction) {
+  case wenhuiFunction:        return std::make_unique<wenhuiFunctionAction>();
   case ASTDeclList:            return std::make_unique<ASTDeclListAction>();
   case ASTDump:                return std::make_unique<ASTDumpAction>();
   case ASTPrint:               return std::make_unique<ASTPrintAction>();
   case ASTView:                return std::make_unique<ASTViewAction>();
-  case DumpCompilerOptions:
-    return std::make_unique<DumpCompilerOptionsAction>();
+  case DumpCompilerOptions:    return std::make_unique<DumpCompilerOptionsAction>();
   case DumpRawTokens:          return std::make_unique<DumpRawTokensAction>();
   case DumpTokens:             return std::make_unique<DumpTokensAction>();
   case EmitAssembly:           return std::make_unique<EmitAssemblyAction>();
