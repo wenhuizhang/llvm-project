@@ -125,13 +125,12 @@ protected:
   /// given index is out of range, or if no symbol has been added for the given
   /// index.
   Expected<NormalizedSymbol &> findSymbolByIndex(uint64_t Index) {
-    if (Index >= IndexToSymbol.size())
-      return make_error<JITLinkError>("Symbol index out of range");
-    auto *Sym = IndexToSymbol[Index];
-    if (!Sym)
+    auto I = IndexToSymbol.find(Index);
+    if (I == IndexToSymbol.end())
       return make_error<JITLinkError>("No symbol at index " +
                                       formatv("{0:d}", Index));
-    return *Sym;
+    assert(I->second && "Null symbol at index");
+    return *I->second;
   }
 
   /// Returns the symbol with the highest address not greater than the search
@@ -159,6 +158,7 @@ protected:
   static bool isAltEntry(const NormalizedSymbol &NSym);
 
   static bool isDebugSection(const NormalizedSection &NSec);
+  static bool isZeroFillSection(const NormalizedSection &NSec);
 
   MachO::relocation_info
   getRelocationInfo(const object::relocation_iterator RelItr) {
@@ -200,8 +200,20 @@ private:
   /// all defined symbols in sections without custom parsers.
   Error graphifyRegularSymbols();
 
+  /// Create and return a graph symbol for the given normalized symbol.
+  ///
+  /// NSym's GraphSymbol member will be updated to point at the newly created
+  /// symbol.
+  Symbol &createStandardGraphSymbol(NormalizedSymbol &Sym, Block &B,
+                                    size_t Size, bool IsText,
+                                    bool IsNoDeadStrip, bool IsCanonical);
+
   /// Create graph blocks and symbols for all sections.
   Error graphifySectionsWithCustomParsers();
+
+  /// Graphify cstring section.
+  Error graphifyCStringSection(NormalizedSection &NSec,
+                               std::vector<NormalizedSymbol *> NSyms);
 
   // Put the BumpPtrAllocator first so that we don't free any of the underlying
   // memory until the Symbol/Addressable destructors have been run.
@@ -216,6 +228,17 @@ private:
   DenseMap<uint32_t, NormalizedSymbol *> IndexToSymbol;
   std::map<JITTargetAddress, Symbol *> AddrToCanonicalSymbol;
   StringMap<SectionParserFunction> CustomSectionParserFunctions;
+};
+
+/// A pass to split up __LD,__compact_unwind sections.
+class CompactUnwindSplitter {
+public:
+  CompactUnwindSplitter(StringRef CompactUnwindSectionName)
+      : CompactUnwindSectionName(CompactUnwindSectionName) {}
+  Error operator()(LinkGraph &G);
+
+private:
+  StringRef CompactUnwindSectionName;
 };
 
 } // end namespace jitlink

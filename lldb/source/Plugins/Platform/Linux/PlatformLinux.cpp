@@ -9,7 +9,7 @@
 #include "PlatformLinux.h"
 #include "lldb/Host/Config.h"
 
-#include <stdio.h>
+#include <cstdio>
 #if LLDB_ENABLE_POSIX
 #include <sys/utsname.h>
 #endif
@@ -72,25 +72,10 @@ PlatformSP PlatformLinux::CreateInstance(bool force, const ArchSpec *arch) {
   return PlatformSP();
 }
 
-ConstString PlatformLinux::GetPluginNameStatic(bool is_host) {
-  if (is_host) {
-    static ConstString g_host_name(Platform::GetHostPlatformName());
-    return g_host_name;
-  } else {
-    static ConstString g_remote_name("remote-linux");
-    return g_remote_name;
-  }
-}
-
-const char *PlatformLinux::GetPluginDescriptionStatic(bool is_host) {
+llvm::StringRef PlatformLinux::GetPluginDescriptionStatic(bool is_host) {
   if (is_host)
     return "Local Linux user platform plug-in.";
-  else
-    return "Remote Linux user platform plug-in.";
-}
-
-ConstString PlatformLinux::GetPluginName() {
-  return GetPluginNameStatic(IsHost());
+  return "Remote Linux user platform plug-in.";
 }
 
 void PlatformLinux::Initialize() {

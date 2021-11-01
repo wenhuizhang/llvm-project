@@ -71,7 +71,8 @@ ErrorOr<std::string> sys::findProgramByName(StringRef Name,
   assert(!Name.empty() && "Must have a name!");
   // Use the given path verbatim if it contains any slashes; this matches
   // the behavior of sh(1) and friends.
-  if (Name.find('/') != StringRef::npos) return std::string(Name);
+  if (Name.contains('/'))
+    return std::string(Name);
 
   SmallVector<StringRef, 16> EnvironmentPaths;
   if (Paths.empty())
@@ -491,6 +492,18 @@ ProcessInfo llvm::sys::Wait(const ProcessInfo &PI, unsigned SecondsToWait,
     WaitResult.ReturnCode = -2;
   }
   return WaitResult;
+}
+
+std::error_code llvm::sys::ChangeStdinMode(fs::OpenFlags Flags){
+  if (!(Flags & fs::OF_Text))
+    return ChangeStdinToBinary();
+  return std::error_code();
+}
+
+std::error_code llvm::sys::ChangeStdoutMode(fs::OpenFlags Flags){
+  if (!(Flags & fs::OF_Text))
+    return ChangeStdoutToBinary();
+  return std::error_code();
 }
 
 std::error_code llvm::sys::ChangeStdinToBinary() {

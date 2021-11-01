@@ -252,13 +252,12 @@ template <class ELFT> void MarkLive<ELFT>::run() {
     // referenced by .eh_frame sections, so we scan them for that here.
     if (auto *eh = dyn_cast<EhInputSection>(sec)) {
       eh->markLive();
-      if (!eh->numRelocations)
-        continue;
 
-      if (eh->areRelocsRela)
-        scanEhFrameSection(*eh, eh->template relas<ELFT>());
-      else
-        scanEhFrameSection(*eh, eh->template rels<ELFT>());
+      const RelsOrRelas<ELFT> rels = eh->template relsOrRelas<ELFT>();
+      if (rels.areRelocsRel())
+        scanEhFrameSection(*eh, rels.rels);
+      else if (rels.relas.size())
+        scanEhFrameSection(*eh, rels.relas);
     }
 
     if (sec->flags & SHF_GNU_RETAIN) {
@@ -270,8 +269,11 @@ template <class ELFT> void MarkLive<ELFT>::run() {
 
     if (isReserved(sec) || script->shouldKeep(sec)) {
       enqueue(sec, 0);
-    } else if (!config->zStartStopGC && isValidCIdentifier(sec->name) &&
-               !sec->nextInSectionGroup) {
+    } else if ((!config->zStartStopGC || sec->name.startswith("__libc_")) &&
+               isValidCIdentifier(sec->name)) {
+      // As a workaround for glibc libc.a before 2.34
+      // (https://sourceware.org/PR27492), retain __libc_atexit and similar
+      // sections regardless of zStartStopGC.
       cNamedSections[saver.save("__start_" + sec->name)].push_back(sec);
       cNamedSections[saver.save("__stop_" + sec->name)].push_back(sec);
     }
@@ -285,13 +287,11 @@ template <class ELFT> void MarkLive<ELFT>::mark() {
   while (!queue.empty()) {
     InputSectionBase &sec = *queue.pop_back_val();
 
-    if (sec.areRelocsRela) {
-      for (const typename ELFT::Rela &rel : sec.template relas<ELFT>())
-        resolveReloc(sec, rel, false);
-    } else {
-      for (const typename ELFT::Rel &rel : sec.template rels<ELFT>())
-        resolveReloc(sec, rel, false);
-    }
+    const RelsOrRelas<ELFT> rels = sec.template relsOrRelas<ELFT>();
+    for (const typename ELFT::Rel &rel : rels.rels)
+      resolveReloc(sec, rel, false);
+    for (const typename ELFT::Rela &rel : rels.relas)
+      resolveReloc(sec, rel, false);
 
     for (InputSectionBase *isec : sec.dependentSections)
       enqueue(isec, 0);
@@ -335,7 +335,7 @@ template <class ELFT> void MarkLive<ELFT>::moveToMain() {
 // so that they are emitted to the output file.
 template <class ELFT> void elf::markLive() {
   llvm::TimeTraceScope timeScope("markLive");
-  // If -gc-sections is not given, no sections are removed.
+  // If --gc-sections is not given, retain all input sections.
   if (!config->gcSections) {
     for (InputSectionBase *sec : inputSections)
       sec->markLive();
@@ -350,7 +350,7 @@ template <class ELFT> void elf::markLive() {
 
   // Otherwise, do mark-sweep GC.
   //
-  // The -gc-sections option works only for SHF_ALLOC sections (sections that
+  // The --gc-sections option works only for SHF_ALLOC sections (sections that
   // are memory-mapped at runtime). So we can unconditionally make non-SHF_ALLOC
   // sections alive except SHF_LINK_ORDER, SHT_REL/SHT_RELA sections, and
   // sections in a group.
@@ -366,7 +366,7 @@ template <class ELFT> void elf::markLive() {
   // We are able to garbage collect them.
   //
   // Note on SHF_REL{,A}: Such sections reach here only when -r
-  // or -emit-reloc were given. And they are subject of garbage
+  // or --emit-reloc were given. And they are subject of garbage
   // collection because, if we remove a text section, we also
   // remove its relocation section.
   //

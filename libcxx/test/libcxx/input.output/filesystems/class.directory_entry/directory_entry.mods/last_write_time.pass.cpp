@@ -9,7 +9,14 @@
 // UNSUPPORTED: c++03
 // ADDITIONAL_COMPILE_FLAGS: -I %S/../../../../../../src/filesystem
 
-// XFAIL: LIBCXX-WINDOWS-FIXME
+// This test relies on calling functions from the libcxx internal header
+// filesystem_common.h; the Windows implementation uses different
+// internals and doesn't provide the same set_file_times function as for
+// other platforms.
+// UNSUPPORTED: windows
+
+// TODO(ldionne): This test fails on Ubuntu Focal on our CI nodes (and only there), in 32 bit mode.
+// UNSUPPORTED: linux && 32bits-on-64bits
 
 // <filesystem>
 

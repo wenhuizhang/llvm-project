@@ -18,6 +18,7 @@
 #include "mlir-c/IR.h"
 #include "mlir-c/IntegerSet.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Optional.h"
 
 namespace mlir {
 namespace python {
@@ -398,6 +399,10 @@ public:
                           bool enableDebugInfo, bool prettyDebugInfo,
                           bool printGenericOpForm, bool useLocalScope);
 
+  /// Moves the operation before or after the other operation.
+  void moveAfter(PyOperationBase &other);
+  void moveBefore(PyOperationBase &other);
+
   /// Each must provide access to the raw Operation.
   virtual PyOperation &getOperation() = 0;
 };
@@ -427,6 +432,14 @@ public:
   createDetached(PyMlirContextRef contextRef, MlirOperation operation,
                  pybind11::object parentKeepAlive = pybind11::object());
 
+  /// Detaches the operation from its parent block and updates its state
+  /// accordingly.
+  void detachFromParent() {
+    mlirOperationRemoveFromParent(getOperation());
+    setDetached();
+    parentKeepAlive = pybind11::object();
+  }
+
   /// Gets the backing operation.
   operator MlirOperation() const { return get(); }
   MlirOperation get() const {
@@ -440,9 +453,13 @@ public:
   }
 
   bool isAttached() { return attached; }
-  void setAttached() {
+  void setAttached(pybind11::object parent = pybind11::object()) {
     assert(!attached && "operation already attached");
     attached = true;
+  }
+  void setDetached() {
+    assert(attached && "operation already detached");
+    attached = false;
   }
   void checkValid() const;
 
@@ -452,7 +469,7 @@ public:
 
   /// Gets the parent operation or raises an exception if the operation has
   /// no parent.
-  PyOperationRef getParentOperation();
+  llvm::Optional<PyOperationRef> getParentOperation();
 
   /// Gets a capsule wrapping the void* within the MlirOperation.
   pybind11::object getCapsule();
@@ -473,6 +490,10 @@ public:
   /// Creates an OpView suitable for this operation.
   pybind11::object createOpView();
 
+  /// Erases the underlying MlirOperation, removes its pointer from the
+  /// parent context's live operations map, and sets the valid bit false.
+  void erase();
+
 private:
   PyOperation(PyMlirContextRef contextRef, MlirOperation operation);
   static PyOperationRef createInstance(PyMlirContextRef contextRef,
@@ -490,6 +511,8 @@ private:
   pybind11::object parentKeepAlive;
   bool attached = true;
   bool valid = true;
+
+  friend class PyOperationBase;
 };
 
 /// A PyOpView is equivalent to the C++ "Op" wrappers: these are the basis for
@@ -528,6 +551,7 @@ public:
       : parentOperation(std::move(parentOperation)), region(region) {
     assert(!mlirRegionIsNull(region) && "python region cannot be null");
   }
+  operator MlirRegion() const { return region; }
 
   MlirRegion get() { return region; }
   PyOperationRef &getParentOperation() { return parentOperation; }
@@ -595,6 +619,71 @@ private:
   llvm::Optional<PyOperationRef> refOperation;
   PyBlock block;
 };
+/// Wrapper around the generic MlirType.
+/// The lifetime of a type is bound by the PyContext that created it.
+class PyType : public BaseContextObject {
+public:
+  PyType(PyMlirContextRef contextRef, MlirType type)
+      : BaseContextObject(std::move(contextRef)), type(type) {}
+  bool operator==(const PyType &other);
+  operator MlirType() const { return type; }
+  MlirType get() const { return type; }
+
+  /// Gets a capsule wrapping the void* within the MlirType.
+  pybind11::object getCapsule();
+
+  /// Creates a PyType from the MlirType wrapped by a capsule.
+  /// Note that PyType instances are uniqued, so the returned object
+  /// may be a pre-existing object. Ownership of the underlying MlirType
+  /// is taken by calling this function.
+  static PyType createFromCapsule(pybind11::object capsule);
+
+private:
+  MlirType type;
+};
+
+/// CRTP base classes for Python types that subclass Type and should be
+/// castable from it (i.e. via something like IntegerType(t)).
+/// By default, type class hierarchies are one level deep (i.e. a
+/// concrete type class extends PyType); however, intermediate python-visible
+/// base classes can be modeled by specifying a BaseTy.
+template <typename DerivedTy, typename BaseTy = PyType>
+class PyConcreteType : public BaseTy {
+public:
+  // Derived classes must define statics for:
+  //   IsAFunctionTy isaFunction
+  //   const char *pyClassName
+  using ClassTy = pybind11::class_<DerivedTy, BaseTy>;
+  using IsAFunctionTy = bool (*)(MlirType);
+
+  PyConcreteType() = default;
+  PyConcreteType(PyMlirContextRef contextRef, MlirType t)
+      : BaseTy(std::move(contextRef), t) {}
+  PyConcreteType(PyType &orig)
+      : PyConcreteType(orig.getContext(), castFrom(orig)) {}
+
+  static MlirType castFrom(PyType &orig) {
+    if (!DerivedTy::isaFunction(orig)) {
+      auto origRepr = pybind11::repr(pybind11::cast(orig)).cast<std::string>();
+      throw SetPyError(PyExc_ValueError, llvm::Twine("Cannot cast type to ") +
+                                             DerivedTy::pyClassName +
+                                             " (from " + origRepr + ")");
+    }
+    return orig;
+  }
+
+  static void bind(pybind11::module &m) {
+    auto cls = ClassTy(m, DerivedTy::pyClassName, pybind11::module_local());
+    cls.def(pybind11::init<PyType &>(), pybind11::keep_alive<0, 1>());
+    cls.def_static("isinstance", [](PyType &otherType) -> bool {
+      return DerivedTy::isaFunction(otherType);
+    });
+    DerivedTy::bindDerived(cls);
+  }
+
+  /// Implemented by derived classes to add methods to the Python subclass.
+  static void bindDerived(ClassTy &m) {}
+};
 
 /// Wrapper around the generic MlirAttribute.
 /// The lifetime of a type is bound by the PyContext that created it.
@@ -642,27 +731,51 @@ private:
   std::unique_ptr<std::string> ownedName;
 };
 
-/// Wrapper around the generic MlirType.
-/// The lifetime of a type is bound by the PyContext that created it.
-class PyType : public BaseContextObject {
+/// CRTP base classes for Python attributes that subclass Attribute and should
+/// be castable from it (i.e. via something like StringAttr(attr)).
+/// By default, attribute class hierarchies are one level deep (i.e. a
+/// concrete attribute class extends PyAttribute); however, intermediate
+/// python-visible base classes can be modeled by specifying a BaseTy.
+template <typename DerivedTy, typename BaseTy = PyAttribute>
+class PyConcreteAttribute : public BaseTy {
 public:
-  PyType(PyMlirContextRef contextRef, MlirType type)
-      : BaseContextObject(std::move(contextRef)), type(type) {}
-  bool operator==(const PyType &other);
-  operator MlirType() const { return type; }
-  MlirType get() const { return type; }
+  // Derived classes must define statics for:
+  //   IsAFunctionTy isaFunction
+  //   const char *pyClassName
+  using ClassTy = pybind11::class_<DerivedTy, BaseTy>;
+  using IsAFunctionTy = bool (*)(MlirAttribute);
 
-  /// Gets a capsule wrapping the void* within the MlirType.
-  pybind11::object getCapsule();
+  PyConcreteAttribute() = default;
+  PyConcreteAttribute(PyMlirContextRef contextRef, MlirAttribute attr)
+      : BaseTy(std::move(contextRef), attr) {}
+  PyConcreteAttribute(PyAttribute &orig)
+      : PyConcreteAttribute(orig.getContext(), castFrom(orig)) {}
 
-  /// Creates a PyType from the MlirType wrapped by a capsule.
-  /// Note that PyType instances are uniqued, so the returned object
-  /// may be a pre-existing object. Ownership of the underlying MlirType
-  /// is taken by calling this function.
-  static PyType createFromCapsule(pybind11::object capsule);
+  static MlirAttribute castFrom(PyAttribute &orig) {
+    if (!DerivedTy::isaFunction(orig)) {
+      auto origRepr = pybind11::repr(pybind11::cast(orig)).cast<std::string>();
+      throw SetPyError(PyExc_ValueError,
+                       llvm::Twine("Cannot cast attribute to ") +
+                           DerivedTy::pyClassName + " (from " + origRepr + ")");
+    }
+    return orig;
+  }
 
-private:
-  MlirType type;
+  static void bind(pybind11::module &m) {
+    auto cls = ClassTy(m, DerivedTy::pyClassName, pybind11::buffer_protocol(),
+                       pybind11::module_local());
+    cls.def(pybind11::init<PyAttribute &>(), pybind11::keep_alive<0, 1>());
+    cls.def_static("isinstance", [](PyAttribute &otherAttr) -> bool {
+      return DerivedTy::isaFunction(otherAttr);
+    });
+    cls.def_property_readonly("type", [](PyAttribute &attr) {
+      return PyType(attr.getContext(), mlirAttributeGetType(attr));
+    });
+    DerivedTy::bindDerived(cls);
+  }
+
+  /// Implemented by derived classes to add methods to the Python subclass.
+  static void bindDerived(ClassTy &m) {}
 };
 
 /// Wrapper around the generic MlirValue.
@@ -675,11 +788,19 @@ class PyValue {
 public:
   PyValue(PyOperationRef parentOperation, MlirValue value)
       : parentOperation(parentOperation), value(value) {}
+  operator MlirValue() const { return value; }
 
   MlirValue get() { return value; }
   PyOperationRef &getParentOperation() { return parentOperation; }
 
   void checkValid() { return parentOperation->checkValid(); }
+
+  /// Gets a capsule wrapping the void* within the MlirValue.
+  pybind11::object getCapsule();
+
+  /// Creates a PyValue from the MlirValue wrapped by a capsule. Ownership of
+  /// the underlying MlirValue is still tied to the owning operation.
+  static PyValue createFromCapsule(pybind11::object capsule);
 
 private:
   PyOperationRef parentOperation;
@@ -758,6 +879,7 @@ private:
 void populateIRAffine(pybind11::module &m);
 void populateIRAttributes(pybind11::module &m);
 void populateIRCore(pybind11::module &m);
+void populateIRInterfaces(pybind11::module &m);
 void populateIRTypes(pybind11::module &m);
 
 } // namespace python

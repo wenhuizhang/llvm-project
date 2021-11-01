@@ -170,7 +170,7 @@ const char *SBDebugger::GetProgressFromEvent(const lldb::SBEvent &event,
   completed = progress_data->GetCompleted();
   total = progress_data->GetTotal();
   is_debugger_specific = progress_data->IsDebuggerSpecific();
-  // We must record the static method _after_ the out paramters have been
+  // We must record the static method _after_ the out parameters have been
   // filled in.
   LLDB_RECORD_STATIC_METHOD(
       const char *, SBDebugger, GetProgressFromEvent,
@@ -1114,7 +1114,7 @@ uint32_t SBDebugger::GetNumAvailablePlatforms() {
 
   uint32_t idx = 0;
   while (true) {
-    if (!PluginManager::GetPlatformPluginNameAtIndex(idx)) {
+    if (PluginManager::GetPlatformPluginNameAtIndex(idx).empty()) {
       break;
     }
     ++idx;
@@ -1133,23 +1133,19 @@ SBStructuredData SBDebugger::GetAvailablePlatformInfoAtIndex(uint32_t idx) {
 
   if (idx == 0) {
     PlatformSP host_platform_sp(Platform::GetHostPlatform());
-    platform_dict->AddStringItem(
-        name_str, host_platform_sp->GetPluginName().GetStringRef());
+    platform_dict->AddStringItem(name_str, host_platform_sp->GetPluginName());
     platform_dict->AddStringItem(
         desc_str, llvm::StringRef(host_platform_sp->GetDescription()));
   } else if (idx > 0) {
-    const char *plugin_name =
+    llvm::StringRef plugin_name =
         PluginManager::GetPlatformPluginNameAtIndex(idx - 1);
-    if (!plugin_name) {
+    if (plugin_name.empty()) {
       return LLDB_RECORD_RESULT(data);
     }
     platform_dict->AddStringItem(name_str, llvm::StringRef(plugin_name));
 
-    const char *plugin_desc =
+    llvm::StringRef plugin_desc =
         PluginManager::GetPlatformPluginDescriptionAtIndex(idx - 1);
-    if (!plugin_desc) {
-      return LLDB_RECORD_RESULT(data);
-    }
     platform_dict->AddStringItem(desc_str, llvm::StringRef(plugin_desc));
   }
 
@@ -1334,7 +1330,6 @@ SBDebugger::GetInternalVariableValue(const char *var_name,
       lldb::SBStringList, SBDebugger, GetInternalVariableValue,
       (const char *, const char *), var_name, debugger_instance_name);
 
-  SBStringList ret_value;
   DebuggerSP debugger_sp(Debugger::FindDebuggerWithInstanceName(
       ConstString(debugger_instance_name)));
   Status error;
@@ -1387,7 +1382,7 @@ void SBDebugger::SetPrompt(const char *prompt) {
   LLDB_RECORD_METHOD(void, SBDebugger, SetPrompt, (const char *), prompt);
 
   if (m_opaque_sp)
-    m_opaque_sp->SetPrompt(llvm::StringRef::withNullAsEmpty(prompt));
+    m_opaque_sp->SetPrompt(llvm::StringRef(prompt));
 }
 
 const char *SBDebugger::GetReproducerPath() const {

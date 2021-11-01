@@ -35,9 +35,15 @@ private:
   SDValue getFFBX_U32(SelectionDAG &DAG, SDValue Op, const SDLoc &DL, unsigned Opc) const;
 
 public:
+  /// \returns The minimum number of bits needed to store the value of \Op as an
+  /// unsigned integer. Truncating to this size and then zero-extending to the
+  /// original size will not change the value.
   static unsigned numBitsUnsigned(SDValue Op, SelectionDAG &DAG);
+
+  /// \returns The minimum number of bits needed to store the value of \Op as a
+  /// signed integer. Truncating to this size and then sign-extending to the
+  /// original size will not change the value.
   static unsigned numBitsSigned(SDValue Op, SelectionDAG &DAG);
-  static bool hasDefinedInitializer(const GlobalValue *GV);
 
 protected:
   SDValue LowerEXTRACT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
@@ -64,10 +70,9 @@ protected:
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
 
-  SDValue LowerFP64_TO_INT(SDValue Op, SelectionDAG &DAG, bool Signed) const;
+  SDValue LowerFP_TO_INT64(SDValue Op, SelectionDAG &DAG, bool Signed) const;
   SDValue LowerFP_TO_FP16(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFP_TO_UINT(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerFP_TO_SINT(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
 
@@ -328,6 +333,9 @@ public:
   }
 
   AtomicExpansionKind shouldExpandAtomicRMWInIR(AtomicRMWInst *) const override;
+
+  bool isConstantUnsignedBitfieldExtactLegal(unsigned Opc, LLT Ty1,
+                                             LLT Ty2) const override;
 };
 
 namespace AMDGPUISD {
@@ -457,9 +465,6 @@ enum NodeType : unsigned {
   // Same as the standard node, except the high bits of the resulting integer
   // are known 0.
   FP_TO_FP16,
-
-  // Wrapper around fp16 results that are known to zero the high bits.
-  FP16_ZEXT,
 
   /// This node is for VLIW targets and it is used to represent a vector
   /// that is stored in consecutive registers with the same channel.

@@ -129,6 +129,12 @@ public:
              isReallyTriviallyReMaterializableGeneric(MI, AA)));
   }
 
+  /// Given \p MO is a PhysReg use return if it can be ignored for the purpose
+  /// of instruction rematerialization.
+  virtual bool isIgnorableUse(const MachineOperand &MO) const {
+    return false;
+  }
+
 protected:
   /// For instructions with opcodes for which the M_REMATERIALIZABLE flag is
   /// set, this hook lets the target specify whether the instruction is actually
@@ -405,8 +411,7 @@ public:
   /// This method returns a null pointer if the transformation cannot be
   /// performed, otherwise it returns the last new instruction.
   ///
-  virtual MachineInstr *convertToThreeAddress(MachineFunction::iterator &MFI,
-                                              MachineInstr &MI,
+  virtual MachineInstr *convertToThreeAddress(MachineInstr &MI,
                                               LiveVariables *LV) const {
     return nullptr;
   }
@@ -458,6 +463,13 @@ public:
   virtual bool findCommutedOpIndices(const MachineInstr &MI,
                                      unsigned &SrcOpIdx1,
                                      unsigned &SrcOpIdx2) const;
+
+  /// Returns true if the target has a preference on the operands order of
+  /// the given machine instruction. And specify if \p Commute is required to
+  /// get the desired operands order.
+  virtual bool hasCommutePreference(MachineInstr &MI, bool &Commute) const {
+    return false;
+  }
 
   /// A pair composed of a register and a sub-register index.
   /// Used to give some type checking when modeling Reg:SubReg.
@@ -570,15 +582,14 @@ public:
   }
 
   /// Insert an unconditional indirect branch at the end of \p MBB to \p
-  /// NewDestBB.  \p BrOffset indicates the offset of \p NewDestBB relative to
+  /// NewDestBB. Optionally, insert the clobbered register restoring in \p
+  /// RestoreBB. \p BrOffset indicates the offset of \p NewDestBB relative to
   /// the offset of the position to insert the new branch.
-  ///
-  /// \returns The number of bytes added to the block.
-  virtual unsigned insertIndirectBranch(MachineBasicBlock &MBB,
-                                        MachineBasicBlock &NewDestBB,
-                                        const DebugLoc &DL,
-                                        int64_t BrOffset = 0,
-                                        RegScavenger *RS = nullptr) const {
+  virtual void insertIndirectBranch(MachineBasicBlock &MBB,
+                                    MachineBasicBlock &NewDestBB,
+                                    MachineBasicBlock &RestoreBB,
+                                    const DebugLoc &DL, int64_t BrOffset = 0,
+                                    RegScavenger *RS = nullptr) const {
     llvm_unreachable("target did not implement");
   }
 
@@ -1524,7 +1535,8 @@ public:
   /// compares against in CmpValue. Return true if the comparison instruction
   /// can be analyzed.
   virtual bool analyzeCompare(const MachineInstr &MI, Register &SrcReg,
-                              Register &SrcReg2, int &Mask, int &Value) const {
+                              Register &SrcReg2, int64_t &Mask,
+                              int64_t &Value) const {
     return false;
   }
 
@@ -1532,7 +1544,8 @@ public:
   /// into something more efficient. E.g., on ARM most instructions can set the
   /// flags register, obviating the need for a separate CMP.
   virtual bool optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
-                                    Register SrcReg2, int Mask, int Value,
+                                    Register SrcReg2, int64_t Mask,
+                                    int64_t Value,
                                     const MachineRegisterInfo *MRI) const {
     return false;
   }
@@ -1610,9 +1623,6 @@ public:
   /// Return the default expected latency for a def based on its opcode.
   unsigned defaultDefLatency(const MCSchedModel &SchedModel,
                              const MachineInstr &DefMI) const;
-
-  int computeDefOperandLatency(const InstrItineraryData *ItinData,
-                               const MachineInstr &DefMI) const;
 
   /// Return true if this opcode has high latency to its result.
   virtual bool isHighLatencyDef(int opc) const { return false; }
@@ -1973,6 +1983,11 @@ public:
   /// not provided.
   virtual unsigned getTailDuplicateSize(CodeGenOpt::Level OptLevel) const {
     return OptLevel >= CodeGenOpt::Aggressive ? 4 : 2;
+  }
+
+  /// Returns the callee operand from the given \p MI.
+  virtual const MachineOperand &getCalleeOperand(const MachineInstr &MI) const {
+    return MI.getOperand(0);
   }
 
 private:

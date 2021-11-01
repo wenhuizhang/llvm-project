@@ -416,8 +416,7 @@ static std::error_code setDeleteDisposition(HANDLE Handle, bool Delete) {
 
   // Check if the file is on a network (non-local) drive. If so, don't
   // continue when DeleteFile is true, since it prevents opening the file for
-  // writes. Note -- this will leak temporary files on disk, but only when the
-  // target file is on a network drive.
+  // writes.
   SmallVector<wchar_t, 128> FinalPath;
   if (std::error_code EC = realPathFromHandle(Handle, FinalPath))
     return EC;
@@ -427,7 +426,7 @@ static std::error_code setDeleteDisposition(HANDLE Handle, bool Delete) {
     return EC;
 
   if (!IsLocal)
-    return std::error_code();
+    return errc::not_supported;
 
   // The file is on a local drive, we can safely set FILE_DISPOSITION_INFO's
   // flag.
@@ -560,11 +559,6 @@ static std::error_code rename_handle(HANDLE FromHandle, const Twine &To) {
   return errc::permission_denied;
 }
 
-static std::error_code rename_fd(int FromFD, const Twine &To) {
-  HANDLE FromHandle = reinterpret_cast<HANDLE>(_get_osfhandle(FromFD));
-  return rename_handle(FromHandle, To);
-}
-
 std::error_code rename(const Twine &From, const Twine &To) {
   // Convert to utf-16.
   SmallVector<wchar_t, 128> WideFrom;
@@ -674,7 +668,7 @@ static bool isReservedName(StringRef path) {
 
   // Then compare against the list of ancient reserved names.
   for (size_t i = 0; i < array_lengthof(sReservedNames); ++i) {
-    if (path.equals_lower(sReservedNames[i]))
+    if (path.equals_insensitive(sReservedNames[i]))
       return true;
   }
 
@@ -1188,12 +1182,6 @@ Expected<file_t> openNativeFile(const Twine &Name, CreationDisposition Disp,
     }
   }
 
-  if (Flags & OF_Delete) {
-    if ((EC = setDeleteDisposition(Result, true))) {
-      ::CloseHandle(Result);
-      return errorCodeToError(EC);
-    }
-  }
   return Result;
 }
 

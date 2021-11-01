@@ -240,12 +240,7 @@ void SymbolFileNativePDB::Terminate() {
 
 void SymbolFileNativePDB::DebuggerInitialize(Debugger &debugger) {}
 
-ConstString SymbolFileNativePDB::GetPluginNameStatic() {
-  static ConstString g_name("native-pdb");
-  return g_name;
-}
-
-const char *SymbolFileNativePDB::GetPluginDescriptionStatic() {
+llvm::StringRef SymbolFileNativePDB::GetPluginDescriptionStatic() {
   return "Microsoft PDB debug symbol cross-platform file reader.";
 }
 
@@ -256,7 +251,7 @@ SymbolFile *SymbolFileNativePDB::CreateInstance(ObjectFileSP objfile_sp) {
 SymbolFileNativePDB::SymbolFileNativePDB(ObjectFileSP objfile_sp)
     : SymbolFile(std::move(objfile_sp)) {}
 
-SymbolFileNativePDB::~SymbolFileNativePDB() {}
+SymbolFileNativePDB::~SymbolFileNativePDB() = default;
 
 uint32_t SymbolFileNativePDB::CalculateAbilities() {
   uint32_t abilities = 0;
@@ -1001,7 +996,7 @@ uint32_t SymbolFileNativePDB::ResolveSymbolContext(
 }
 
 uint32_t SymbolFileNativePDB::ResolveSymbolContext(
-    const FileSpec &file_spec, uint32_t line, bool check_inlines,
+    const SourceLocationSpec &src_location_spec,
     lldb::SymbolContextItem resolve_scope, SymbolContextList &sc_list) {
   return 0;
 }
@@ -1039,7 +1034,7 @@ static void TerminateLineSequence(LineTable &table,
   table.AppendLineEntryToSequence(seq.get(), base_addr + block.CodeSize,
                                   last_line, 0, file_number, false, false,
                                   false, false, true);
-  table.InsertSequence(seq.release());
+  table.InsertSequence(seq.get());
 }
 
 bool SymbolFileNativePDB::ParseLineTable(CompileUnit &comp_unit) {
@@ -1567,9 +1562,8 @@ SymbolFileNativePDB::GetTypeSystemForLanguage(lldb::LanguageType language) {
   return type_system_or_err;
 }
 
-ConstString SymbolFileNativePDB::GetPluginName() {
-  static ConstString g_name("pdb");
-  return g_name;
+uint64_t SymbolFileNativePDB::GetDebugInfoSize() {
+  // PDB files are a separate file that contains all debug info.
+  return m_index->pdb().getFileSize();
 }
 
-uint32_t SymbolFileNativePDB::GetPluginVersion() { return 1; }

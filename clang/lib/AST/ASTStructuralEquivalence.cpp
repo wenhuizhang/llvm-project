@@ -86,6 +86,7 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -1590,6 +1591,26 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
   return true;
 }
 
+static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
+                                     EnumConstantDecl *D1,
+                                     EnumConstantDecl *D2) {
+  const llvm::APSInt &FromVal = D1->getInitVal();
+  const llvm::APSInt &ToVal = D2->getInitVal();
+  if (FromVal.isSigned() != ToVal.isSigned())
+    return false;
+  if (FromVal.getBitWidth() != ToVal.getBitWidth())
+    return false;
+  if (FromVal != ToVal)
+    return false;
+
+  if (!IsStructurallyEquivalent(D1->getIdentifier(), D2->getIdentifier()))
+    return false;
+
+  // Init expressions are the most expensive check, so do them last.
+  return IsStructurallyEquivalent(Context, D1->getInitExpr(),
+                                  D2->getInitExpr());
+}
+
 /// Determine structural equivalence of two enums.
 static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                      EnumDecl *D1, EnumDecl *D2) {
@@ -1623,7 +1644,7 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                           diag::err_odr_tag_type_inconsistent))
             << Context.ToCtx.getTypeDeclType(D2);
         Context.Diag1(EC1->getLocation(), diag::note_odr_enumerator)
-            << EC1->getDeclName() << EC1->getInitVal().toString(10);
+            << EC1->getDeclName() << toString(EC1->getInitVal(), 10);
         Context.Diag2(D2->getLocation(), diag::note_odr_missing_enumerator);
       }
       return false;
@@ -1639,9 +1660,9 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                           diag::err_odr_tag_type_inconsistent))
             << Context.ToCtx.getTypeDeclType(D2);
         Context.Diag2(EC2->getLocation(), diag::note_odr_enumerator)
-            << EC2->getDeclName() << EC2->getInitVal().toString(10);
+            << EC2->getDeclName() << toString(EC2->getInitVal(), 10);
         Context.Diag1(EC1->getLocation(), diag::note_odr_enumerator)
-            << EC1->getDeclName() << EC1->getInitVal().toString(10);
+            << EC1->getDeclName() << toString(EC1->getInitVal(), 10);
       }
       return false;
     }
@@ -1653,7 +1674,7 @@ static bool IsStructurallyEquivalent(StructuralEquivalenceContext &Context,
                                            diag::err_odr_tag_type_inconsistent))
           << Context.ToCtx.getTypeDeclType(D2);
       Context.Diag2(EC2->getLocation(), diag::note_odr_enumerator)
-          << EC2->getDeclName() << EC2->getInitVal().toString(10);
+          << EC2->getDeclName() << toString(EC2->getInitVal(), 10);
       Context.Diag1(D1->getLocation(), diag::note_odr_missing_enumerator);
     }
     return false;

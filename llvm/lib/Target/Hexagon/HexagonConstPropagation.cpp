@@ -6,8 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "hcp"
-
 #include "HexagonInstrInfo.h"
 #include "HexagonRegisterInfo.h"
 #include "HexagonSubtarget.h"
@@ -44,6 +42,8 @@
 #include <set>
 #include <utility>
 #include <vector>
+
+#define DEBUG_TYPE "hcp"
 
 using namespace llvm;
 
@@ -863,14 +863,13 @@ void MachineConstPropagator::removeCFGEdge(MachineBasicBlock *From,
   // First, remove the CFG successor/predecessor information.
   From->removeSuccessor(To);
   // Remove all corresponding PHI operands in the To block.
-  for (auto I = To->begin(), E = To->getFirstNonPHI(); I != E; ++I) {
-    MachineInstr *PN = &*I;
+  for (MachineInstr &PN : To->phis()) {
     // reg0 = PHI reg1, bb2, reg3, bb4, ...
-    int N = PN->getNumOperands()-2;
+    int N = PN.getNumOperands() - 2;
     while (N > 0) {
-      if (PN->getOperand(N+1).getMBB() == From) {
-        PN->RemoveOperand(N+1);
-        PN->RemoveOperand(N);
+      if (PN.getOperand(N + 1).getMBB() == From) {
+        PN.RemoveOperand(N + 1);
+        PN.RemoveOperand(N);
       }
       N -= 2;
     }

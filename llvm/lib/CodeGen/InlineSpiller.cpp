@@ -928,6 +928,39 @@ foldMemoryOperand(ArrayRef<std::pair<MachineInstr *, unsigned>> Ops,
   // Update the call site info.
   if (MI->isCandidateForCallSiteEntry())
     MI->getMF()->moveCallSiteInfo(MI, FoldMI);
+
+  // If we've folded a store into an instruction labelled with debug-info,
+  // record a substitution from the old operand to the memory operand. Handle
+  // the simple common case where operand 0 is the one being folded, plus when
+  // the destination operand is also a tied def. More values could be
+  // substituted / preserved with more analysis.
+  if (MI->peekDebugInstrNum() && Ops[0].second == 0) {
+    // Helper lambda.
+    auto MakeSubstitution = [this,FoldMI,MI,&Ops]() {
+      // Substitute old operand zero to the new instructions memory operand.
+      unsigned OldOperandNum = Ops[0].second;
+      unsigned NewNum = FoldMI->getDebugInstrNum();
+      unsigned OldNum = MI->getDebugInstrNum();
+      MF.makeDebugValueSubstitution({OldNum, OldOperandNum},
+                         {NewNum, MachineFunction::DebugOperandMemNumber});
+    };
+
+    const MachineOperand &Op0 = MI->getOperand(Ops[0].second);
+    if (Ops.size() == 1 && Op0.isDef()) {
+      MakeSubstitution();
+    } else if (Ops.size() == 2 && Op0.isDef() && MI->getOperand(1).isTied() &&
+               Op0.getReg() == MI->getOperand(1).getReg()) {
+      MakeSubstitution();
+    }
+  } else if (MI->peekDebugInstrNum()) {
+    // This is a debug-labelled instruction, but the operand being folded isn't
+    // at operand zero. Most likely this means it's a load being folded in.
+    // Substitute any register defs from operand zero up to the one being
+    // folded -- past that point, we don't know what the new operand indexes
+    // will be.
+    MF.substituteDebugValuesForInst(*MI, *FoldMI, Ops[0].second);
+  }
+
   MI->eraseFromParent();
 
   // Insert any new instructions other than FoldMI into the LIS maps.
@@ -1245,13 +1278,16 @@ bool HoistSpillHelper::rmFromMergeableSpills(MachineInstr &Spill,
 /// i.e., there should be a living sibling of OrigReg at the insert point.
 bool HoistSpillHelper::isSpillCandBB(LiveInterval &OrigLI, VNInfo &OrigVNI,
                                      MachineBasicBlock &BB, Register &LiveReg) {
-  SlotIndex Idx;
+  SlotIndex Idx = IPA.getLastInsertPoint(OrigLI, BB);
+  // The original def could be after the last insert point in the root block,
+  // we can't hoist to here.
+  if (Idx < OrigVNI.def) {
+    // TODO: We could be better here. If LI is not alive in landing pad
+    // we could hoist spill after LIP.
+    LLVM_DEBUG(dbgs() << "can't spill in root block - def after LIP\n");
+    return false;
+  }
   Register OrigReg = OrigLI.reg();
-  MachineBasicBlock::iterator MI = IPA.getLastInsertPointIter(OrigLI, BB);
-  if (MI != BB.end())
-    Idx = LIS.getInstructionIndex(*MI);
-  else
-    Idx = LIS.getMBBEndIdx(&BB).getPrevSlot();
   SmallSetVector<Register, 16> &Siblings = Virt2SiblingsMap[OrigReg];
   assert(OrigLI.getVNInfoAt(Idx) == &OrigVNI && "Unexpected VNI");
 

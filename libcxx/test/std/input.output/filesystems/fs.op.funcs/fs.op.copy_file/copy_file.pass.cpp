@@ -8,11 +8,12 @@
 
 // UNSUPPORTED: c++03
 
-// XFAIL: LIBCXX-WINDOWS-FIXME
-
 // The string reported on errors changed, which makes those tests fail when run
 // against already-released libc++'s.
-// XFAIL: with_system_cxx_lib=macosx10.15
+// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.15
+
+// TODO(ldionne): This test fails on Ubuntu Focal on our CI nodes (and only there), in 32 bit mode.
+// UNSUPPORTED: linux && 32bits-on-64bits
 
 // <filesystem>
 
@@ -114,7 +115,7 @@ TEST_CASE(test_attributes_get_copied) {
   TEST_REQUIRE(fs::copy_file(file, dest, ec) == true);
   TEST_CHECK(!ec);
   auto new_st = status(dest);
-  TEST_CHECK(new_st.permissions() == new_perms);
+  TEST_CHECK(new_st.permissions() == NormalizeExpectedPerms(new_perms));
 }
 
 TEST_CASE(copy_dir_test) {
